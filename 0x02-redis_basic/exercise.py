@@ -7,6 +7,7 @@ from typing import Union
 from typing import Callable
 from functools import wraps
 
+
 class Cache:
     """
     A class representing a cache using Redis.
@@ -16,18 +17,32 @@ class Cache:
     """
     def __init__(self):
         """
-        Initializes the Cache object by connecting to Redis and flushing 
+        Initializes the Cache object by connecting to Redis and flushing
         the database.
         """
         self._redis = redis.Redis()
         self._redis.flushdb()
+
+    @classmethod
+    def _normalize_args(cls, args):
+        """
+        Normalize arguments to string representation for storage in Redis.
+
+        Args:
+            args: The arguments to normalize.
+
+        Returns:
+            str: The normalized string representation of the arguments.
+        """
+        return str(args)
 
     def store(self, data: Union[str, bytes, int, float]) -> str:
         """
         Stores the provided data in the cache and returns the generated key.
 
         Args:
-            data (Union[str, bytes, int, float]): The data to be stored in the cache.
+            data (Union[str, bytes, int, float]): The data to be stored
+            in the cache.
 
         Returns:
             str: The key under which the data is stored in the cache.
@@ -35,7 +50,7 @@ class Cache:
         key = str(uuid.uuid4())
         self._redis.set(key, data)
         return key
-    
+
     def get(self, key: str, fn: Callable = None) -> Union[str, bytes, int,
                                                           float, None]:
         """
@@ -47,7 +62,7 @@ class Cache:
                                      Defaults to None.
 
         Returns:
-            Union[str, bytes, int, float, None]: The retrieved data from the 
+            Union[str, bytes, int, float, None]: The retrieved data from the
                         cache, optionally transformed by the provided function.
         """
         data = self._redis.get(key)
@@ -82,24 +97,46 @@ class Cache:
                               or None if the key does not exist.
         """
         return self.get(key, fn=int)
- 
-# Test the Cache class
-cache = Cache()
-
-TEST_CASES = {
-    b"foo": None,
-    123: int,
-    "bar": lambda d: d.decode("utf-8")
-}
-
-for value, fn in TEST_CASES.items():
-    key = cache.store(value)
-    assert cache.get(key, fn=fn) == value
 
 
-    def count_calls(method: Callable) -> Callable:
-        """
-        A decorator to count the number of calls to a method.
+# # Test the Cache class
+# cache = Cache()
+
+# TEST_CASES = {
+#     b"foo": None,
+#     123: int,
+#     "bar": lambda d: d.decode("utf-8")
+# }
+
+# for value, fn in TEST_CASES.items():
+#     key = cache.store(value)
+#     assert cache.get(key, fn=fn) == value
+
+def count_calls(method: Callable) -> Callable:
+    """
+    A decorator to count the number of calls to a method.
+
+    Args:
+    method (Callable): The method to be decorated.
+
+    Returns:
+        Callable: The decorated method.
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        key = method.__qualname__
+        self._redis.incr(key)
+        return method(self, *args, **kwargs)
+    return wrapper
+
+
+# Decorate Cache.store with count_calls
+Cache.store = count_calls(Cache.store)
+
+
+def call_history(method: Callable) -> Callable:
+    """
+    A decorator to store the history of inputs and outputs.
 
     Args:
         method (Callable): The method to be decorated.
@@ -107,12 +144,23 @@ for value, fn in TEST_CASES.items():
     Returns:
         Callable: The decorated method.
     """
-        @wraps(method)
-        def wrapper(self, *args, **kwargs):
-            key = method.__qualname__
-            self._redis.incr(key)
-            return method(self, *args, **kwargs)
-        return wrapper
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        input_key = f"{method.__qualname__}:inputs"
+        output_key = f"{method.__qualname__}:outputs"
 
-# Decorate Cache.store with count_calls
-Cache.store = count_calls(Cache.store)
+        # Store input arguments
+        self._redis.rpush(input_key, self._normalize_args(args))
+
+        # Execute the original method
+        result = method(self, *args, **kwargs)
+
+        # Store the output result
+        self._redis.rpush(output_key, self._normalize_args(result))
+
+        return result
+    return wrapper
+
+
+# Decorate Cache.store with call_history
+Cache.store = call_history(Cache.store)
