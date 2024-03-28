@@ -4,6 +4,8 @@
 import redis
 import uuid
 from typing import Union
+from typing import Callable
+from functools import wraps
 
 class Cache:
     """
@@ -14,7 +16,8 @@ class Cache:
     """
     def __init__(self):
         """
-        Initializes the Cache object by connecting to Redis and flushing the database.
+        Initializes the Cache object by connecting to Redis and flushing 
+        the database.
         """
         self._redis = redis.Redis()
         self._redis.flushdb()
@@ -33,18 +36,19 @@ class Cache:
         self._redis.set(key, data)
         return key
     
-    def get(self, key: str, fn: Callable = None) -> Union[str, bytes, int, float, None]:
+    def get(self, key: str, fn: Callable = None) -> Union[str, bytes, int,
+                                                          float, None]:
         """
         Retrieves data from the cache using the provided key.
 
         Args:
             key (str): The key associated with the data in the cache.
-            fn (Callable, optional): A callable function to convert the retrieved data.
+            fn (Callable, optional): To convert the retrieved data.
                                      Defaults to None.
 
         Returns:
-            Union[str, bytes, int, float, None]: The retrieved data from the cache,
-                                                  optionally transformed by the provided function.
+            Union[str, bytes, int, float, None]: The retrieved data from the 
+                        cache, optionally transformed by the provided function.
         """
         data = self._redis.get(key)
         if data is None:
@@ -78,16 +82,37 @@ class Cache:
                               or None if the key does not exist.
         """
         return self.get(key, fn=int)
-    
-    # Test the Cache class
-    cache = Cache()
+ 
+# Test the Cache class
+cache = Cache()
 
-    TEST_CASES = {
-        b"foo": None,
-        123: int,
-        "bar": lambda d: d.decode("utf-8")
-    }
+TEST_CASES = {
+    b"foo": None,
+    123: int,
+    "bar": lambda d: d.decode("utf-8")
+}
 
-    for value, fn in TEST_CASES.items():
-        key = cache.store(value)
-        assert cache.get(key, fn=fn) == value
+for value, fn in TEST_CASES.items():
+    key = cache.store(value)
+    assert cache.get(key, fn=fn) == value
+
+
+    def count_calls(method: Callable) -> Callable:
+        """
+        A decorator to count the number of calls to a method.
+
+    Args:
+        method (Callable): The method to be decorated.
+
+    Returns:
+        Callable: The decorated method.
+    """
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            key = method.__qualname__
+            self._redis.incr(key)
+            return method(self, *args, **kwargs)
+        return wrapper
+
+# Decorate Cache.store with count_calls
+Cache.store = count_calls(Cache.store)
