@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-""" This module contains a function that retrieves the HTML content of a URL"""
-""" Redis web catche tracker """
+""" This module contains a function that retrieves Redis web catche tracker """
 import redis
 import requests
 from functools import wraps
